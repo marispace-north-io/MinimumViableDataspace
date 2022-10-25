@@ -2,14 +2,17 @@ terraform {
   required_providers {
     azurerm = {
       source  = "hashicorp/azurerm"
-      version = ">= 3.1.0"
+      version = ">= 3.7.0"
     }
   }
 
-  backend "azurerm" {}
+  backend "azurerm" {
+    use_oidc = true
+  }
 }
 
 provider "azurerm" {
+  use_oidc = true
   features {
     key_vault {
       purge_soft_delete_on_destroy = true
@@ -19,6 +22,11 @@ provider "azurerm" {
       prevent_deletion_if_contains_resources = false
     }
   }
+}
+
+locals {
+  edc_resources_folder     = "/resources"
+  dataspace_authority_name = "authority"
 }
 
 data "azurerm_subscription" "current_subscription" {
@@ -41,7 +49,8 @@ locals {
   edc_default_port                 = 8181
   registration_service_port        = 8182
   registration_service_path_prefix = "/authority"
-  registration_service_url         = "http://${local.registration_service_dns_label}.${var.location}.azurecontainer.io:${local.registration_service_port}${local.registration_service_path_prefix}"
+  registration_service_host        = "${local.registration_service_dns_label}.${var.location}.azurecontainer.io"
+  registration_service_url         = "http://${local.registration_service_host}:${local.registration_service_port}${local.registration_service_path_prefix}"
 
   dataspace_did_uri = "did:web:${azurerm_storage_account.dataspace_did.primary_web_host}"
   gaiax_did_uri     = "did:web:${azurerm_storage_account.gaiax_did.primary_web_host}"
@@ -80,8 +89,23 @@ resource "azurerm_container_group" "registration-service" {
     memory = var.container_memory
 
     ports {
+      port     = local.edc_default_port
+      protocol = "TCP"
+    }
+
+    ports {
       port     = local.registration_service_port
       protocol = "TCP"
+    }
+
+    volume {
+      name       = "shared"
+      mount_path = local.edc_resources_folder
+      read_only  = true
+      share_name = azurerm_storage_share.share.name
+
+      storage_account_name = azurerm_storage_account.shared.name
+      storage_account_key  = azurerm_storage_account.shared.primary_access_key
     }
 
     environment_variables = {
@@ -93,13 +117,17 @@ resource "azurerm_container_group" "registration-service" {
 
       EDC_IDENTITY_DID_URL = local.dataspace_did_uri
 
-      JWT_AUDIENCE            = local.registration_service_url
-      WEB_HTTP_AUTHORITY_PORT = local.registration_service_port
-      WEB_HTTP_AUTHORITY_PATH = local.registration_service_path_prefix
+      JWT_AUDIENCE                  = local.registration_service_url
+      WEB_HTTP_AUTHORITY_PORT       = local.registration_service_port
+      WEB_HTTP_AUTHORITY_PATH       = local.registration_service_path_prefix
+      APPLICATIONINSIGHTS_ROLE_NAME = local.connector_name
+
+      EDC_SELF_DESCRIPTION_DOCUMENT_PATH = "${local.edc_resources_folder}/${azurerm_storage_share_file.sdd.name}"
     }
 
     secure_environment_variables = {
-      EDC_VAULT_CLIENTSECRET = var.application_sp_client_secret
+      APPLICATIONINSIGHTS_CONNECTION_STRING = azurerm_application_insights.dataspace.connection_string
+      EDC_VAULT_CLIENTSECRET                = var.application_sp_client_secret
     }
 
     liveness_probe {
@@ -141,91 +169,17 @@ resource "azurerm_role_assignment" "current-user-secretsofficer" {
   principal_id         = data.azurerm_client_config.current_client.object_id
 }
 
-# Internal Dataspace Authority resources (Dataspace DID)
-resource "azurerm_storage_account" "dataspace_did" {
-  name                     = "${var.prefix}dataspacedid"
+resource "azurerm_storage_account" "shared" {
+  name                     = "${var.prefix}${local.dataspace_authority_name}shared"
   resource_group_name      = azurerm_resource_group.dataspace.name
-  location                 = var.location
+  location                 = azurerm_resource_group.dataspace.location
   account_tier             = "Standard"
   account_replication_type = "LRS"
   account_kind             = "StorageV2"
-  static_website {}
 }
 
-resource "azurerm_storage_blob" "dataspace_did" {
-  name                 = ".well-known/did.json" # `.well-known` path is defined by did:web specification
-  storage_account_name = azurerm_storage_account.dataspace_did.name
-  # Create did blob only if public_key_jwk_file is provided. Default public_key_jwk_file value is null.
-  count                  = var.public_key_jwk_file_authority == null ? 0 : 1
-  storage_container_name = "$web" # container used to serve static files (see static_website property on storage account)
-  type                   = "Block"
-  source_content = jsonencode({
-    id = local.dataspace_did_uri
-    "@context" = [
-      "https://www.w3.org/ns/did/v1",
-      {
-        "@base" = local.dataspace_did_uri
-      }
-    ],
-    "service" : [
-      {
-        "id" : "#registration-url",
-        "type" : "RegistrationUrl",
-        "serviceEndpoint" : local.registration_service_url
-      }
-    ],
-    "verificationMethod" = [
-      {
-        "id"           = "#identity-key-authority"
-        "controller"   = ""
-        "type"         = "JsonWebKey2020"
-        "publicKeyJwk" = jsondecode(file(var.public_key_jwk_file_authority))
-      }
-    ],
-    "authentication" : [
-      "#identity-key-authority"
-  ] })
-  content_type = "application/json"
+resource "azurerm_storage_share" "share" {
+  name                 = "share"
+  storage_account_name = azurerm_storage_account.shared.name
+  quota                = 1
 }
-
-# GAIA-X Authority resources
-resource "azurerm_storage_account" "gaiax_did" {
-  name                     = "${var.prefix}gaiaxdid"
-  resource_group_name      = azurerm_resource_group.dataspace.name
-  location                 = var.location
-  account_tier             = "Standard"
-  account_replication_type = "LRS"
-  account_kind             = "StorageV2"
-  static_website {}
-}
-
-resource "azurerm_storage_blob" "gaiax_did" {
-  name                 = ".well-known/did.json" # `.well-known` path is defined by did:web specification
-  storage_account_name = azurerm_storage_account.gaiax_did.name
-  # Create did blob only if public_key_jwk_file is provided. Default public_key_jwk_file value is null.
-  count                  = var.public_key_jwk_file_gaiax == null ? 0 : 1
-  storage_container_name = "$web" # container used to serve static files (see static_website property on storage account)
-  type                   = "Block"
-  source_content = jsonencode({
-    id = local.gaiax_did_uri
-    "@context" = [
-      "https://www.w3.org/ns/did/v1",
-      {
-        "@base" = local.gaiax_did_uri
-      }
-    ],
-    "service" : [],
-    "verificationMethod" = [
-      {
-        "id"           = "#identity-key-gaiax"
-        "controller"   = ""
-        "type"         = "JsonWebKey2020"
-        "publicKeyJwk" = jsondecode(file(var.public_key_jwk_file_gaiax))
-      }
-    ],
-    "authentication" : [
-      "#identity-key-gaiax"
-  ] })
-  content_type = "application/json"
-}
-

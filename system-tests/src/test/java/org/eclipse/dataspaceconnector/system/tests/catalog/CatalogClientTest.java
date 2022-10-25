@@ -62,7 +62,7 @@ class CatalogClientTest {
             assertThat(nodes)
                     .isNotEmpty()
                     .allSatisfy(
-                        n -> assertThat(n.getAsset().getProperty(Asset.PROPERTY_ID)).asString()
+                        n -> assertThat(n.getAsset().getId()).asString()
                                 .satisfiesAnyOf(
                                         s -> assertThat(s).startsWith(NON_RESTRICTED_ASSET_PREFIX),
                                         s -> assertThat(s).startsWith(RESTRICTED_ASSET_PREFIX)));
@@ -78,6 +78,7 @@ class CatalogClientTest {
                 .then()
                 .statusCode(200)
                 .extract().body().asString();
-        return typeManager.readValue(nodesJson, new TypeReference<List<ContractOffer>>(){});
+        return typeManager.readValue(nodesJson, new TypeReference<>() {
+        });
     }
 }
