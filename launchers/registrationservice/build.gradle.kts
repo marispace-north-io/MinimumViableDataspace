@@ -18,45 +18,35 @@ plugins {
     id("com.github.johnrengelman.shadow") version "7.0.0"
 }
 
-val edcVersion: String by project
-val edcGroup: String by project
-val identityHubVersion: String by project
-val identityHubGroup: String by project
-val registrationServiceGroup: String by project;
-val registrationServiceVersion : String by project;
-
 dependencies {
-    implementation("${registrationServiceGroup}:registration-service:${registrationServiceVersion}")
-    implementation("${registrationServiceGroup}:participant-verifier:${registrationServiceVersion}")
-    implementation("${registrationServiceGroup}:registration-policy-gaiax-member:${registrationServiceVersion}")
+    implementation(registrationService.core)
+    implementation(registrationService.ext.participantVerifier)
+    implementation(registrationService.ext.registrationPolicy.gaiaxMember)
 
-
-    implementation("${edcGroup}:identity-did-web:${edcVersion}")
-    implementation("${edcGroup}:identity-did-core:${edcVersion}")
-    implementation("${edcGroup}:core-base:${edcVersion}")
-    runtimeOnly("${edcGroup}:core-boot:${edcVersion}")
-    implementation("${edcGroup}:control-plane-core:${edcVersion}")
-    implementation("${edcGroup}:observability-api:${edcVersion}")
-    implementation("${edcGroup}:core-micrometer:${edcVersion}")
-    runtimeOnly("${edcGroup}:jetty-micrometer:${edcVersion}")
-    runtimeOnly("${edcGroup}:jersey-micrometer:${edcVersion}")
-    implementation("${edcGroup}:filesystem-configuration:${edcVersion}")
-    implementation("${identityHubGroup}:identity-hub-credentials-verifier:${identityHubVersion}")
-
-    // JDK Logger
-    implementation("${edcGroup}:jdk-logger-monitor:${edcVersion}")
+    implementation(edc.identity.did.web)
+    implementation(edc.identity.did.core)
+    implementation(edc.core.connector)
+    runtimeOnly(edc.boot)
+    implementation(edc.core.controlplane)
+    implementation(edc.api.observability)
+    implementation(edc.core.micrometer)
+    runtimeOnly(edc.micrometer.jetty)
+    runtimeOnly(edc.micrometer.jersey)
+    implementation(edc.config.filesystem)
+    implementation(identityHub.ext.api)
+    implementation(identityHub.ext.credentialsVerifier)
 
     // To use FileSystem vault e.g. -DuseFsVault="true".Only for non-production usages.
     val useFsVault: Boolean = System.getProperty("useFsVault", "false").toBoolean()
     if (useFsVault) {
-        implementation("${edcGroup}:filesystem-vault:${edcVersion}")
+        implementation(edc.vault.filesystem)
     } else {
-        implementation("${edcGroup}:azure-vault:${edcVersion}")
+        implementation(edc.vault.azure)
     }
 }
 
 application {
-    mainClass.set("org.eclipse.dataspaceconnector.boot.system.runtime.BaseRuntime")
+    mainClass.set("org.eclipse.edc.boot.system.runtime.BaseRuntime")
 }
 
 tasks.withType<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar> {

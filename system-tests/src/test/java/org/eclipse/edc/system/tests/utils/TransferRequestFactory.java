@@ -12,15 +12,9 @@
  *
  */
 
-plugins {
-    `java-library`
-}
+package org.eclipse.edc.system.tests.utils;
 
-dependencies {
-    api(edc.spi.ids)
-    api(edc.spi.contract)
-    api(edc.core.connector)
-    implementation(identityHub.spi.core)
+import java.util.function.Function;
 
-    testImplementation(edc.policy.engine)
+public interface TransferRequestFactory extends Function<TransferSimulationUtils.TransferInitiationData, String> {
 }
